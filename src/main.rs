@@ -1,3 +1,5 @@
+mod config;
+
 use axum::{
     extract::Form,
     http::StatusCode,
@@ -21,12 +23,13 @@ async fn subscribe(Form(info): Form<SubscriptionInfo>) {
 
 #[tokio::main]
 async fn main() {
+    let cfg = config::Config::load().unwrap();
     let app = Router::new()
         .route("/", get(|| async { "Hello, World!" }))
         .route("/health", get(|| async { StatusCode::OK }))
         .route("/subscribe", post(subscribe));
 
-    let listener = TcpListener::bind("0.0.0.0:0").unwrap();
+    let listener = TcpListener::bind(format!("0.0.0.0:{}", cfg.server.port)).unwrap();
     let addr = listener.local_addr().unwrap().to_string();
     eprintln!("Running on:");
     println!("http://{}", addr);
