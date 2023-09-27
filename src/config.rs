@@ -33,3 +33,12 @@ impl Config {
             .map_err(anyhow::Error::from)
     }
 }
+
+impl DatabaseConfig {
+    pub fn as_url(self) -> String {
+        format!(
+            "postgres://{}:{}@{}:{}/{}",
+            self.username, self.password, self.host, self.port, self.name
+        )
+    }
+}
