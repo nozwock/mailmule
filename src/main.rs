@@ -1,15 +1,35 @@
-use axum::{http::StatusCode, routing::get, Router};
+use axum::{
+    extract::Form,
+    http::StatusCode,
+    routing::{get, post},
+    Router,
+};
+use serde::Deserialize;
 use std::net::TcpListener;
+
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+struct SubscriptionInfo {
+    name: String,
+    email: String,
+}
+
+/// Content-Type: application/x-www-form-urlencoded
+async fn subscribe(Form(info): Form<SubscriptionInfo>) {
+    eprintln!("{:?}", info);
+}
 
 #[tokio::main]
 async fn main() {
     let app = Router::new()
         .route("/", get(|| async { "Hello, World!" }))
-        .route("/health", get(|| async { StatusCode::OK }));
+        .route("/health", get(|| async { StatusCode::OK }))
+        .route("/subscribe", post(subscribe));
 
     let listener = TcpListener::bind("0.0.0.0:0").unwrap();
     let addr = listener.local_addr().unwrap().to_string();
-    println!("Running on:\nhttp://{}", addr);
+    eprintln!("Running on:");
+    println!("http://{}", addr);
 
     axum::Server::from_tcp(listener)
         .unwrap()
