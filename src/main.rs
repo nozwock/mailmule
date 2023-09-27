@@ -3,6 +3,7 @@ mod config;
 use axum::{
     extract::{Form, State},
     http::StatusCode,
+    response::{IntoResponse, Response},
     routing::{get, post},
     Router,
 };
@@ -11,6 +12,8 @@ use serde::Deserialize;
 use sqlx::PgPool;
 use std::net::TcpListener;
 use uuid::Uuid;
+
+type ServerResult<T, E = ServerError> = core::result::Result<T, E>;
 
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
@@ -23,7 +26,7 @@ struct SubscriptionInfo {
 async fn subscribe(
     State(poll): State<PgPool>,
     Form(form): Form<SubscriptionInfo>,
-) -> Result<StatusCode, (StatusCode, String)> {
+) -> ServerResult<StatusCode> {
     sqlx::query!(
         r#"
         INSERT INTO subscribers (id, email, name, subscribed_at)
@@ -35,8 +38,7 @@ async fn subscribe(
         Utc::now()
     )
     .execute(&poll)
-    .await
-    .map_err(internal_error)?;
+    .await?;
 
     Ok(StatusCode::OK)
 }
@@ -64,9 +66,20 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn internal_error<E>(err: E) -> (StatusCode, String)
+#[derive(Debug)]
+struct ServerError(anyhow::Error);
+
+impl IntoResponse for ServerError {
+    fn into_response(self) -> Response {
+        (StatusCode::INTERNAL_SERVER_ERROR, self.0.to_string()).into_response()
+    }
+}
+
+impl<E> From<E> for ServerError
 where
-    E: std::error::Error,
+    E: Into<anyhow::Error>,
 {
-    (StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+    fn from(value: E) -> Self {
+        Self(value.into())
+    }
 }
