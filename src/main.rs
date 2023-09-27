@@ -24,7 +24,7 @@ struct SubscriptionInfo {
 
 /// Content-Type: application/x-www-form-urlencoded
 async fn subscribe(
-    State(poll): State<PgPool>,
+    State(pool): State<PgPool>,
     Form(form): Form<SubscriptionInfo>,
 ) -> ServerResult<StatusCode> {
     sqlx::query!(
@@ -37,7 +37,7 @@ async fn subscribe(
         form.name,
         Utc::now()
     )
-    .execute(&poll)
+    .execute(&pool)
     .await?;
 
     Ok(StatusCode::OK)
