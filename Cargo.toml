@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.75"
 axum = "0.6.20"
+chrono = "0.4.31"
 config = { version = "0.13.3", default-features = false, features = ["toml"] }
 serde = { version = "1.0.188", features = ["derive"] }
 sqlx = { version = "0.7.2", features = [
@@ -19,3 +20,4 @@ sqlx = { version = "0.7.2", features = [
     "postgres",
 ] }
 tokio = { version = "1.32.0", features = ["full"] }
+uuid = { version = "1.4.1", features = ["v4"] }
