@@ -8,5 +8,13 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.75"
 axum = "0.6.20"
+config = { version = "0.13.3", default-features = false, features = ["toml"] }
 serde = { version = "1.0.188", features = ["derive"] }
+sqlx = { version = "0.7.2", features = [
+    "runtime-tokio-native-tls",
+    "macros",
+    "uuid",
+    "chrono",
+    "migrate",
+] }
 tokio = { version = "1.32.0", features = ["full"] }
