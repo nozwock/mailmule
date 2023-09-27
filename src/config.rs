@@ -35,10 +35,16 @@ impl Config {
 }
 
 impl DatabaseConfig {
-    pub fn as_url(self) -> String {
-        format!(
-            "postgres://{}:{}@{}:{}/{}",
-            self.username, self.password, self.host, self.port, self.name
-        )
+    pub fn as_url(&self, with_db: bool) -> String {
+        let url = format!(
+            "postgres://{}:{}@{}:{}",
+            self.username, self.password, self.host, self.port
+        );
+
+        if with_db {
+            format!("{}/{}", url, self.name)
+        } else {
+            url
+        }
     }
 }
