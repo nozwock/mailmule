@@ -24,7 +24,7 @@ ROOT_DIR=$(dirname $(realpath "$0"))
 ENV_FILE=$(dirname "$ROOT_DIR")/.env
 source "$ENV_FILE"
 
-env_exists DB_USER DB_PASSWORD DB_PORT DB_NAME
+env_exists DB_USER DB_PASSWORD DB_PORT DB_NAME DATABASE_URL
 
 docker image inspect 'postgres' >/dev/null
 if [[ -z "$(docker ps -qf 'ancestor=postgres')" ]]; then
@@ -43,6 +43,6 @@ until psql -U "$DB_USER" -h "localhost" -p "$DB_PORT" -d "$DB_NAME" -c '\q' 2>/d
     sleep 1
 done
 
-export DATABASE_URL="postgres://${DB_USER}:${DB_PASSWORD}@localhost:${DB_PORT}/${DB_NAME}"
+export DATABASE_URL
 sqlx database create
 sqlx migrate run
