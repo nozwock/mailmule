@@ -1,8 +1,9 @@
 mod config;
 
 use axum::{
-    extract::{Form, State},
-    http::StatusCode,
+    body::Bytes,
+    extract::{Form, MatchedPath, State},
+    http::{HeaderMap, Request, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
     Router,
@@ -10,7 +11,12 @@ use axum::{
 use chrono::Utc;
 use serde::Deserialize;
 use sqlx::PgPool;
-use std::net::TcpListener;
+use std::time::Duration;
+use tokio::net::TcpListener;
+use tower_http::{classify::ServerErrorsFailureClass, trace::TraceLayer};
+use tracing::info;
+use tracing::{info_span, Span};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use uuid::Uuid;
 
 type ServerResult<T, E = ServerError> = core::result::Result<T, E>;
@@ -40,26 +46,81 @@ async fn subscribe(
     .execute(&pool)
     .await?;
 
+    info!(form.email, form.name, "Subscription Sign-up");
+
     Ok(StatusCode::OK)
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::Registry::default()
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                // axum logs rejections from built-in extractors with the `axum::rejection`
+                // target, at `TRACE` level. `axum::rejection=trace` enables showing those events
+                "mailmule=debug,tower_http=debug,axum::rejection=trace".into()
+            }),
+        )
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+
     let cfg = config::Config::load()?;
 
-    let pool = sqlx::PgPool::connect(&cfg.db.as_url(true)).await?;
+    let db_url = cfg.db.as_url(true);
+    let pool = sqlx::PgPool::connect(&db_url).await?;
+
+    info!(db_url, "Connected to the database");
 
     let app = Router::new()
         .route("/", get(|| async { "Hello, World!" }))
         .route("/health", get(|| async { StatusCode::OK }))
-        .route("/subscribe", post(subscribe).with_state(pool));
+        .route("/subscribe", post(subscribe).with_state(pool))
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(|request: &Request<_>| {
+                    // Log the matched route's path (with placeholders not filled in).
+                    // Use request.uri() or OriginalUri if you want the real path.
+                    let matched_path = request
+                        .extensions()
+                        .get::<MatchedPath>()
+                        .map(MatchedPath::as_str);
 
-    let listener = TcpListener::bind(format!("0.0.0.0:{}", cfg.server.port))?;
+                    info_span!(
+                        "http_request",
+                        method = ?request.method(),
+                        matched_path,
+                        some_other_field = tracing::field::Empty,
+                    )
+                })
+                .on_request(|_request: &Request<_>, _span: &Span| {
+                    // You can use `_span.record("some_other_field", value)` in one of these
+                    // closures to attach a value to the initially empty field in the info_span
+                    // created above.
+                })
+                .on_response(|_response: &Response, _latency: Duration, _span: &Span| {
+                    // ...
+                })
+                .on_body_chunk(|_chunk: &Bytes, _latency: Duration, _span: &Span| {
+                    // ...
+                })
+                .on_eos(
+                    |_trailers: Option<&HeaderMap>, _stream_duration: Duration, _span: &Span| {
+                        // ...
+                    },
+                )
+                .on_failure(
+                    |_error: ServerErrorsFailureClass, _latency: Duration, _span: &Span| {
+                        // ...
+                    },
+                ),
+        );
+
+    let listener = TcpListener::bind(format!("0.0.0.0:{}", cfg.server.port)).await?;
     let addr = listener.local_addr()?.to_string();
-    eprintln!("Running on:");
-    println!("http://{}", addr);
 
-    axum::Server::from_tcp(listener)?
+    info!(addr = format!("http://{}", addr), "Starting server on");
+
+    axum::Server::from_tcp(listener.into_std()?)?
         .serve(app.into_make_service())
         .await?;
 
