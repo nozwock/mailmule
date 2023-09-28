@@ -14,8 +14,7 @@ use sqlx::PgPool;
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tower_http::{classify::ServerErrorsFailureClass, trace::TraceLayer};
-use tracing::info;
-use tracing::{info_span, Span};
+use tracing::{error, info, info_span, instrument, Span};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use uuid::Uuid;
 
@@ -29,16 +28,24 @@ struct SubscriptionInfo {
 }
 
 /// Content-Type: application/x-www-form-urlencoded
+#[instrument(
+    skip(pool, form),
+    fields(
+        email = %form.email,
+        name = %form.name
+    )
+)]
 async fn subscribe(
     State(pool): State<PgPool>,
     Form(form): Form<SubscriptionInfo>,
 ) -> ServerResult<StatusCode> {
+    let uuid = Uuid::new_v4();
     sqlx::query!(
         r#"
         INSERT INTO subscribers (id, email, name, subscribed_at)
         VALUES ($1, $2, $3, $4)
         "#,
-        Uuid::new_v4(),
+        uuid,
         form.email,
         form.name,
         Utc::now()
@@ -46,7 +53,7 @@ async fn subscribe(
     .execute(&pool)
     .await?;
 
-    info!(form.email, form.name, "Subscription Sign-up");
+    info!(?uuid, "Subscriber added to the database");
 
     Ok(StatusCode::OK)
 }
@@ -141,6 +148,8 @@ where
     E: Into<anyhow::Error>,
 {
     fn from(value: E) -> Self {
-        Self(value.into())
+        let err = value.into();
+        error!(%err);
+        Self(err)
     }
 }
