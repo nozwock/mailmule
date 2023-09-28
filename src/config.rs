@@ -10,6 +10,7 @@ pub struct Config {
 #[derive(Debug, serde::Deserialize)]
 #[allow(dead_code)]
 pub struct ServerConfig {
+    pub host: String,
     pub port: u16,
 }
 

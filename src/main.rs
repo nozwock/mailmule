@@ -122,7 +122,7 @@ async fn main() -> anyhow::Result<()> {
                 ),
         );
 
-    let listener = TcpListener::bind(format!("0.0.0.0:{}", cfg.server.port)).await?;
+    let listener = TcpListener::bind(format!("{}:{}", cfg.server.host, cfg.server.port)).await?;
     let addr = listener.local_addr()?.to_string();
 
     info!(addr = format!("http://{}", addr), "Starting server on");
