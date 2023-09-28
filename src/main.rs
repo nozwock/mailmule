@@ -73,10 +73,10 @@ async fn main() -> anyhow::Result<()> {
 
     let cfg = config::Config::load()?;
 
-    let db_url = cfg.db.as_url(true);
-    let pool = sqlx::PgPool::connect(&db_url).await?;
+    let pg_opts = cfg.db.as_url(true);
+    let pool = sqlx::PgPool::connect_with(pg_opts.clone()).await?;
 
-    info!(db_url, "Connected to the database");
+    info!(pg_opts = ?pg_opts.password("REDACTED"), "Connected to the database");
 
     let app = Router::new()
         .route("/", get(|| async { "Hello, World!" }))
@@ -122,7 +122,7 @@ async fn main() -> anyhow::Result<()> {
                 ),
         );
 
-    let listener = TcpListener::bind(format!("{}:{}", cfg.server.host, cfg.server.port)).await?;
+    let listener = TcpListener::bind(format!("{}:{}", cfg.app.host, cfg.app.port)).await?;
     let addr = listener.local_addr()?.to_string();
 
     info!(addr = format!("http://{}", addr), "Starting server on");

@@ -1,15 +1,16 @@
 use anyhow::Result;
+use sqlx::postgres::PgConnectOptions;
 
 #[derive(Debug, serde::Deserialize)]
 #[allow(dead_code)]
 pub struct Config {
-    pub server: ServerConfig,
+    pub app: AppConfig,
     pub db: DatabaseConfig,
 }
 
 #[derive(Debug, serde::Deserialize)]
 #[allow(dead_code)]
-pub struct ServerConfig {
+pub struct AppConfig {
     pub host: String,
     pub port: u16,
 }
@@ -21,7 +22,7 @@ pub struct DatabaseConfig {
     pub password: String,
     pub host: String,
     pub port: u16,
-    pub name: String,
+    pub database: String,
 }
 
 impl Config {
@@ -36,16 +37,17 @@ impl Config {
 }
 
 impl DatabaseConfig {
-    pub fn as_url(&self, with_db: bool) -> String {
-        let url = format!(
-            "postgres://{}:{}@{}:{}",
-            self.username, self.password, self.host, self.port
-        );
+    pub fn as_url(&self, with_db: bool) -> PgConnectOptions {
+        let options = PgConnectOptions::new()
+            .host(&self.host)
+            .port(self.port)
+            .username(&self.username)
+            .password(&self.password);
 
         if with_db {
-            format!("{}/{}", url, self.name)
+            options.database(&self.database)
         } else {
-            url
+            options
         }
     }
 }
