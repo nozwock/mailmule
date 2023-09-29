@@ -120,6 +120,7 @@ async fn main() -> Result<()> {
     info!(addr = format!("http://{}", addr), "Starting server on");
     axum::Server::from_tcp(listener.into_std()?)?
         .serve(app.into_make_service())
+        .with_graceful_shutdown(shutdown_signal())
         .await?;
 
     Ok(())
@@ -143,4 +144,32 @@ where
         error!(?err);
         Self(err)
     }
+}
+
+async fn shutdown_signal() {
+    use tokio::signal;
+
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to install signal handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+
+    eprintln!("starting shutdown");
 }
