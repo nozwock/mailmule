@@ -1,11 +1,14 @@
 use anyhow::Result;
 use sqlx::postgres::PgConnectOptions;
 
+use crate::email::Email;
+
 #[derive(Debug, serde::Deserialize)]
 #[allow(dead_code)]
 pub struct Config {
     pub app: AppConfig,
     pub db: DatabaseConfig,
+    pub email_client: EmailClientConfig,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -23,6 +26,13 @@ pub struct DatabaseConfig {
     pub host: String,
     pub port: u16,
     pub database: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[allow(dead_code)]
+pub struct EmailClientConfig {
+    pub api_url: String,
+    pub sender_email: Email,
 }
 
 impl Config {

@@ -1,6 +1,3 @@
-mod config;
-mod subscribe;
-
 use anyhow::Result;
 use axum::{
     body::Bytes,
@@ -11,9 +8,9 @@ use axum::{
     Router,
 };
 use chrono::Utc;
+use mailmule::{config::Config, subscribe::SubscriptionForm};
 use sqlx::PgPool;
 use std::time::Duration;
-use subscribe::SubscriptionForm;
 use tokio::net::TcpListener;
 use tower_http::{classify::ServerErrorsFailureClass, trace::TraceLayer};
 use tracing::{error, info, info_span, instrument, Span};
@@ -66,7 +63,7 @@ async fn main() -> Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let cfg = config::Config::load()?;
+    let cfg = Config::load()?;
 
     let pg_opts = cfg.db.as_url(true);
     let pool = sqlx::PgPool::connect_with(pg_opts.clone()).await?;
