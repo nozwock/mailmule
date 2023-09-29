@@ -10,8 +10,9 @@ anyhow = "1.0.75"
 axum = { version = "0.6.20", features = ["tracing"] }
 chrono = "0.4.31"
 config = { version = "0.13.3", default-features = false, features = ["toml"] }
-reqwest = "0.11.20"
+reqwest = { version = "0.11.20", features = ["json"] }
 serde = { version = "1.0.188", features = ["derive"] }
+serde_with = { version = "3.3.0", features = ["time_0_3"] }
 sqlx = { version = "0.7.2", features = [
     "runtime-tokio-native-tls",
     "macros",
