@@ -1,14 +1,18 @@
 use anyhow::Result;
 use axum::{
     body::Bytes,
-    extract::{Form, MatchedPath, State},
+    extract::{Form, MatchedPath, Query, State},
     http::{HeaderMap, Request, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
     Router,
 };
 use chrono::Utc;
-use mailmule::{config::Config, subscribe::SubscriptionForm};
+use mailmule::{
+    config::Config,
+    subscribe::{SubscriptionConfirmQuery, SubscriptionForm, SubscriptionStatus},
+};
+use rand::Rng;
 use sqlx::PgPool;
 use std::time::Duration;
 use tokio::net::TcpListener;
@@ -18,6 +22,8 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use uuid::Uuid;
 
 type ServerResult<T, E = ServerError> = core::result::Result<T, E>;
+
+const SUBSCRIPTION_TOKEN_LEN: usize = 26;
 
 /// Content-Type: application/x-www-form-urlencoded
 #[instrument(
@@ -31,23 +37,54 @@ async fn subscribe(
     State(pool): State<PgPool>,
     Form(form): Form<SubscriptionForm>,
 ) -> ServerResult<StatusCode> {
+    let mut transaction = pool.begin().await?;
+
     let uuid = Uuid::new_v4();
     sqlx::query!(
         r#"
-        INSERT INTO subscribers (id, email, name, subscribed_at)
-        VALUES ($1, $2, $3, $4)
+        INSERT INTO subscribers (id, email, name, status, subscribed_at)
+        VALUES ($1, $2, $3, $4, $5)
         "#,
         uuid,
         form.email.as_ref(),
         form.name.as_ref(),
+        SubscriptionStatus::default().to_string(),
         Utc::now()
     )
-    .execute(&pool)
+    .execute(&mut *transaction)
     .await?;
 
-    info!(?uuid, "Subscriber added to the database");
+    let subscription_token = subscription_token(SUBSCRIPTION_TOKEN_LEN);
+    sqlx::query!(
+        r#"INSERT INTO subscription_tokens (subscription_token, subscriber_id)
+        VALUES ($1, $2)
+        "#,
+        subscription_token,
+        uuid
+    )
+    .execute(&mut *transaction)
+    .await?;
+
+    transaction.commit().await?;
+
+    info!(
+        ?uuid,
+        subscription_token, "Subscriber added to the database"
+    );
 
     Ok(StatusCode::OK)
+}
+
+#[instrument(skip(pool))]
+async fn subscribe_confirm(
+    State(pool): State<PgPool>,
+    Query(query): Query<SubscriptionConfirmQuery>,
+) -> ServerResult<impl IntoResponse> {
+    todo!();
+
+    // let mut transaction = pool.begin().await?;
+
+    Ok((StatusCode::OK, "Subscription Confirmed!"))
 }
 
 #[tokio::main]
@@ -73,7 +110,11 @@ async fn main() -> Result<()> {
     let app = Router::new()
         .route("/", get(|| async { "Hello, World!" }))
         .route("/health", get(|| async { StatusCode::OK }))
-        .route("/subscribe", post(subscribe).with_state(pool))
+        .route("/subscribe", post(subscribe).with_state(pool.clone()))
+        .route(
+            "/subscribe/confirm",
+            post(subscribe_confirm).with_state(pool.clone()),
+        )
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(|request: &Request<_>| {
@@ -124,6 +165,14 @@ async fn main() -> Result<()> {
         .await?;
 
     Ok(())
+}
+
+fn subscription_token(len: usize) -> String {
+    let mut rng = rand::thread_rng();
+    std::iter::repeat_with(|| rng.sample(rand::distributions::Alphanumeric))
+        .map(char::from)
+        .take(len)
+        .collect()
 }
 
 #[derive(Debug)]

@@ -9,6 +9,25 @@ pub struct SubscriptionForm {
     pub email: EmailAdderess,
 }
 
+#[derive(Debug, serde::Deserialize)]
+#[allow(dead_code)]
+pub struct SubscriptionConfirmQuery {
+    pub token: String,
+}
+
+#[derive(Debug, Default)]
+pub enum SubscriptionStatus {
+    #[default]
+    Pending,
+    Confirmed,
+}
+
+impl std::fmt::Display for SubscriptionStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
 #[derive(Debug)]
 pub struct SubscriberName(String);
 
