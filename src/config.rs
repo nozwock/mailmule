@@ -1,7 +1,7 @@
+use crate::email::EmailAdderess;
 use anyhow::Result;
 use sqlx::postgres::PgConnectOptions;
-
-use crate::email::Email;
+use std::time::Duration;
 
 #[derive(Debug, serde::Deserialize)]
 #[allow(dead_code)]
@@ -28,11 +28,15 @@ pub struct DatabaseConfig {
     pub database: String,
 }
 
+#[serde_with::serde_as]
 #[derive(Debug, serde::Deserialize)]
 #[allow(dead_code)]
 pub struct EmailClientConfig {
     pub api_url: String,
-    pub sender_email: Email,
+    pub api_token: String,
+    pub sender_email: EmailAdderess,
+    #[serde_as(as = "serde_with::DurationMilliSeconds<u64>")]
+    pub timeout_ms: Duration,
 }
 
 impl Config {

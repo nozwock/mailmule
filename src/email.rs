@@ -1,9 +1,10 @@
 use anyhow::{bail, Result};
+use std::time::Duration;
 
-#[derive(Debug)]
-pub struct Email(String);
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct EmailAdderess(String);
 
-impl Email {
+impl EmailAdderess {
     pub fn new(s: String) -> Result<Self> {
         if validator::validate_email(&s) {
             Ok(Self(s))
@@ -13,18 +14,81 @@ impl Email {
     }
 }
 
-impl AsRef<str> for Email {
+impl AsRef<str> for EmailAdderess {
     fn as_ref(&self) -> &str {
         &self.0
     }
 }
 
-impl<'de> serde::Deserialize<'de> for Email {
+impl<'de> serde::Deserialize<'de> for EmailAdderess {
     fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        Email::new(s).map_err(serde::de::Error::custom)
+        EmailAdderess::new(s).map_err(serde::de::Error::custom)
+    }
+}
+
+/// PostMark is used for this EmailClient.
+pub struct EmailClient {
+    pub client: reqwest::Client,
+    pub api_url: String,
+    pub api_token: String,
+    pub sender_email: EmailAdderess,
+}
+
+impl EmailClient {
+    pub fn new(
+        timeout: Duration,
+        api_url: String,
+        api_token: String,
+        sender_email: EmailAdderess,
+    ) -> Result<Self> {
+        Ok(Self {
+            client: reqwest::Client::builder().timeout(timeout).build()?,
+            api_url,
+            api_token,
+            sender_email,
+        })
+    }
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct EmailRequestBody<'a> {
+    pub from: &'a str,
+    pub to: &'a str,
+    pub subject: &'a str,
+    pub text_body: &'a str,
+    pub html_body: &'a str,
+}
+
+impl EmailClient {
+    pub async fn email(
+        &self,
+        to: EmailAdderess,
+        subject: &str,
+        text_body: &str,
+        html_body: &str,
+    ) -> Result<()> {
+        let request_body = EmailRequestBody {
+            from: self.sender_email.as_ref(),
+            to: to.as_ref(),
+            subject,
+            text_body,
+            html_body,
+        };
+
+        let send_email_api_endpoint = format!("{}/email", self.api_url);
+        self.client
+            .post(&send_email_api_endpoint)
+            .header("X-Postmark-Server-Token", &self.api_token)
+            .json(&request_body)
+            .send()
+            .await?
+            .error_for_status()?;
+
+        Ok(())
     }
 }

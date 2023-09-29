@@ -1,4 +1,4 @@
-use crate::email::Email;
+use crate::email::EmailAdderess;
 use anyhow::{bail, Result};
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -6,7 +6,7 @@ use unicode_segmentation::UnicodeSegmentation;
 #[allow(dead_code)]
 pub struct SubscriptionForm {
     pub name: SubscriberName,
-    pub email: Email,
+    pub email: EmailAdderess,
 }
 
 #[derive(Debug)]
