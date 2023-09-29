@@ -65,10 +65,10 @@ async fn main() -> Result<()> {
 
     let cfg = Config::load()?;
 
-    let pg_opts = cfg.db.as_url(true);
-    let pool = sqlx::PgPool::connect_with(pg_opts.clone()).await?;
-
-    info!(pg_opts = ?pg_opts.password("REDACTED"), "Connected to the database");
+    let pg_opts = cfg.db.get_connect_options(true);
+    info!(pg_opts = ?pg_opts.clone().password("REDACTED"), "Connecting to the database");
+    let pool = sqlx::PgPool::connect_with(pg_opts).await?;
+    info!("Connected to the database");
 
     let app = Router::new()
         .route("/", get(|| async { "Hello, World!" }))
@@ -118,7 +118,6 @@ async fn main() -> Result<()> {
     let addr = listener.local_addr()?.to_string();
 
     info!(addr = format!("http://{}", addr), "Starting server on");
-
     axum::Server::from_tcp(listener.into_std()?)?
         .serve(app.into_make_service())
         .await?;

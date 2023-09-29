@@ -47,7 +47,7 @@ impl Config {
 }
 
 impl DatabaseConfig {
-    pub fn as_url(&self, with_db: bool) -> PgConnectOptions {
+    pub fn get_connect_options(&self, with_db: bool) -> PgConnectOptions {
         let options = PgConnectOptions::new()
             .host(&self.host)
             .port(self.port)
