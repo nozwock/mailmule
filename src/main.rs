@@ -1,5 +1,7 @@
 mod config;
+mod subscribe;
 
+use anyhow::Result;
 use axum::{
     body::Bytes,
     extract::{Form, MatchedPath, State},
@@ -9,9 +11,9 @@ use axum::{
     Router,
 };
 use chrono::Utc;
-use serde::Deserialize;
 use sqlx::PgPool;
 use std::time::Duration;
+use subscribe::SubscriptionForm;
 use tokio::net::TcpListener;
 use tower_http::{classify::ServerErrorsFailureClass, trace::TraceLayer};
 use tracing::{error, info, info_span, instrument, Span};
@@ -20,24 +22,17 @@ use uuid::Uuid;
 
 type ServerResult<T, E = ServerError> = core::result::Result<T, E>;
 
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-struct SubscriptionInfo {
-    name: String,
-    email: String,
-}
-
 /// Content-Type: application/x-www-form-urlencoded
 #[instrument(
     skip(pool, form),
     fields(
-        email = %form.email,
-        name = %form.name
+        email = ?form.email,
+        name = ?form.name
     )
 )]
 async fn subscribe(
     State(pool): State<PgPool>,
-    Form(form): Form<SubscriptionInfo>,
+    Form(form): Form<SubscriptionForm>,
 ) -> ServerResult<StatusCode> {
     let uuid = Uuid::new_v4();
     sqlx::query!(
@@ -46,8 +41,8 @@ async fn subscribe(
         VALUES ($1, $2, $3, $4)
         "#,
         uuid,
-        form.email,
-        form.name,
+        form.email.as_ref(),
+        form.name.as_ref(),
         Utc::now()
     )
     .execute(&pool)
@@ -59,7 +54,7 @@ async fn subscribe(
 }
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<()> {
     tracing_subscriber::Registry::default()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
@@ -149,7 +144,7 @@ where
 {
     fn from(value: E) -> Self {
         let err = value.into();
-        error!(%err);
+        error!(?err);
         Self(err)
     }
 }
