@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use axum::{
     body::Bytes,
     extract::{Form, MatchedPath, Query, State},
@@ -56,7 +56,8 @@ async fn subscribe(
 
     let subscription_token = subscription_token(SUBSCRIPTION_TOKEN_LEN);
     sqlx::query!(
-        r#"INSERT INTO subscription_tokens (subscription_token, subscriber_id)
+        r#"
+        INSERT INTO subscription_tokens (subscription_token, subscriber_id)
         VALUES ($1, $2)
         "#,
         subscription_token,
@@ -64,6 +65,8 @@ async fn subscribe(
     )
     .execute(&mut *transaction)
     .await?;
+
+    // TODO: Send an email with the subscription confirm link.
 
     transaction.commit().await?;
 
@@ -75,14 +78,39 @@ async fn subscribe(
     Ok(StatusCode::OK)
 }
 
-#[instrument(skip(pool))]
+#[instrument(
+    skip(pool, query),
+    fields(token = query.token)
+)]
 async fn subscribe_confirm(
     State(pool): State<PgPool>,
     Query(query): Query<SubscriptionConfirmQuery>,
 ) -> ServerResult<impl IntoResponse> {
-    todo!();
+    let uuid = sqlx::query!(
+        r#"
+        SELECT subscriber_id FROM subscription_tokens
+        WHERE subscription_token = $1
+        "#,
+        query.token
+    )
+    .fetch_optional(&pool)
+    .await?
+    .map(|obj| obj.subscriber_id)
+    .context("No such subscription token found.")?;
 
-    // let mut transaction = pool.begin().await?;
+    sqlx::query!(
+        r#"
+        UPDATE subscribers
+        SET status = $1
+        WHERE id = $2
+        "#,
+        SubscriptionStatus::Confirmed.to_string(),
+        uuid
+    )
+    .execute(&pool)
+    .await?;
+
+    info!(?uuid, "Subscription confirmed");
 
     Ok((StatusCode::OK, "Subscription Confirmed!"))
 }
@@ -113,7 +141,7 @@ async fn main() -> Result<()> {
         .route("/subscribe", post(subscribe).with_state(pool.clone()))
         .route(
             "/subscribe/confirm",
-            post(subscribe_confirm).with_state(pool.clone()),
+            get(subscribe_confirm).with_state(pool.clone()),
         )
         .layer(
             TraceLayer::new_for_http()
