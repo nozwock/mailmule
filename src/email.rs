@@ -1,3 +1,4 @@
+use crate::config::EmailClientConfig;
 use anyhow::{bail, Result};
 use std::time::Duration;
 
@@ -31,6 +32,7 @@ impl<'de> serde::Deserialize<'de> for EmailAdderess {
 }
 
 /// PostMark is used for this EmailClient.
+#[derive(Debug, Clone)]
 pub struct EmailClient {
     pub client: reqwest::Client,
     pub api_url: String,
@@ -54,6 +56,19 @@ impl EmailClient {
     }
 }
 
+impl TryFrom<EmailClientConfig> for EmailClient {
+    type Error = anyhow::Error;
+
+    fn try_from(value: EmailClientConfig) -> std::result::Result<Self, Self::Error> {
+        Self::new(
+            value.timeout_ms,
+            value.api_url,
+            value.api_token,
+            value.sender_email,
+        )
+    }
+}
+
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct EmailRequestBody<'a> {
@@ -65,6 +80,7 @@ pub struct EmailRequestBody<'a> {
 }
 
 impl EmailClient {
+    /// https://postmarkapp.com/developer/user-guide/send-email-with-api/send-a-single-email
     pub async fn email(
         &self,
         to: EmailAdderess,
