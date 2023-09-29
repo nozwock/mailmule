@@ -15,17 +15,11 @@ pub struct SubscriptionConfirmQuery {
     pub token: String,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, strum::Display, strum::EnumString)]
 pub enum SubscriptionStatus {
     #[default]
     Pending,
     Confirmed,
-}
-
-impl std::fmt::Display for SubscriptionStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
-    }
 }
 
 #[derive(Debug)]

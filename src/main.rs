@@ -14,7 +14,7 @@ use mailmule::{
 };
 use rand::Rng;
 use sqlx::PgPool;
-use std::time::Duration;
+use std::{str::FromStr, time::Duration};
 use tokio::net::TcpListener;
 use tower_http::{classify::ServerErrorsFailureClass, trace::TraceLayer};
 use tracing::{error, info, info_span, instrument, Span};
@@ -29,53 +29,75 @@ const SUBSCRIPTION_TOKEN_LEN: usize = 26;
 #[instrument(
     skip(pool, form),
     fields(
-        email = ?form.email,
-        name = ?form.name
+        email = form.email.as_ref(),
+        name = form.name.as_ref()
     )
 )]
 async fn subscribe(
     State(pool): State<PgPool>,
     Form(form): Form<SubscriptionForm>,
-) -> ServerResult<StatusCode> {
-    let mut transaction = pool.begin().await?;
-
-    let uuid = Uuid::new_v4();
-    sqlx::query!(
+) -> ServerResult<impl IntoResponse> {
+    match sqlx::query!(
         r#"
-        INSERT INTO subscribers (id, email, name, status, subscribed_at)
-        VALUES ($1, $2, $3, $4, $5)
+        SELECT status FROM subscribers
+        WHERE email = $1
         "#,
-        uuid,
-        form.email.as_ref(),
-        form.name.as_ref(),
-        SubscriptionStatus::default().to_string(),
-        Utc::now()
+        form.email.as_ref()
     )
-    .execute(&mut *transaction)
-    .await?;
+    .fetch_optional(&pool)
+    .await?
+    .map(|obj| SubscriptionStatus::from_str(&obj.status).expect("Value stored in db must be valid"))
+    {
+        Some(SubscriptionStatus::Confirmed) => Ok((
+            StatusCode::OK,
+            format!("{} is already subscribed", form.email.as_ref()),
+        )),
+        Some(SubscriptionStatus::Pending) => {
+            Ok((StatusCode::OK, "TODO: send confirmation email again".into()))
+        }
+        None => {
+            // Add subscriber
+            let mut transaction = pool.begin().await?;
 
-    let subscription_token = subscription_token(SUBSCRIPTION_TOKEN_LEN);
-    sqlx::query!(
-        r#"
-        INSERT INTO subscription_tokens (subscription_token, subscriber_id)
-        VALUES ($1, $2)
-        "#,
-        subscription_token,
-        uuid
-    )
-    .execute(&mut *transaction)
-    .await?;
+            let uuid = Uuid::new_v4();
+            sqlx::query!(
+                r#"
+                INSERT INTO subscribers (id, email, name, status, subscribed_at)
+                VALUES ($1, $2, $3, $4, $5)
+                "#,
+                uuid,
+                form.email.as_ref(),
+                form.name.as_ref(),
+                SubscriptionStatus::default().to_string(),
+                Utc::now()
+            )
+            .execute(&mut *transaction)
+            .await?;
 
-    // TODO: Send an email with the subscription confirm link.
+            let subscription_token = subscription_token(SUBSCRIPTION_TOKEN_LEN);
+            sqlx::query!(
+                r#"
+                INSERT INTO subscription_tokens (subscription_token, subscriber_id)
+                VALUES ($1, $2)
+                "#,
+                subscription_token,
+                uuid
+            )
+            .execute(&mut *transaction)
+            .await?;
 
-    transaction.commit().await?;
+            transaction.commit().await?;
 
-    info!(
-        ?uuid,
-        subscription_token, "Subscriber added to the database"
-    );
+            info!(
+                ?uuid,
+                subscription_token, "Subscriber added to the database"
+            );
 
-    Ok(StatusCode::OK)
+            // TODO: Send an email with the subscription confirm link.
+
+            Ok((StatusCode::OK, "A confirmation email has been sent.".into()))
+        }
+    }
 }
 
 #[instrument(
