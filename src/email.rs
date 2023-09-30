@@ -35,7 +35,7 @@ impl<'de> serde::Deserialize<'de> for EmailAdderess {
 #[derive(Debug, Clone)]
 pub struct EmailClient {
     pub client: reqwest::Client,
-    pub api_url: String,
+    pub api_url: reqwest::Url,
     pub api_token: String,
     pub sender_email: EmailAdderess,
 }
@@ -43,7 +43,7 @@ pub struct EmailClient {
 impl EmailClient {
     pub fn new(
         timeout: Duration,
-        api_url: String,
+        api_url: reqwest::Url,
         api_token: String,
         sender_email: EmailAdderess,
     ) -> Result<Self> {
@@ -62,7 +62,7 @@ impl TryFrom<EmailClientConfig> for EmailClient {
     fn try_from(value: EmailClientConfig) -> std::result::Result<Self, Self::Error> {
         Self::new(
             value.timeout_ms,
-            value.api_url,
+            value.api_url.0,
             value.api_token,
             value.sender_email,
         )
@@ -96,10 +96,10 @@ impl EmailClient {
             html_body,
         };
 
-        let send_email_api_endpoint = format!("{}/email", self.api_url);
+        let send_email_api_endpoint = self.api_url.join("email")?;
         let resp = self
             .client
-            .post(&send_email_api_endpoint)
+            .post(send_email_api_endpoint)
             .header("X-Postmark-Server-Token", &self.api_token)
             .json(&request_body)
             .send()
@@ -107,7 +107,7 @@ impl EmailClient {
             .error_for_status()?;
 
         // TODO: parse json response body. and evaluate ErrorCode
-        tracing::debug!(response_body = %resp.text().await.unwrap_or("Empty response body".into()));
+        tracing::debug!(response_body = %resp.text().await.unwrap_or("[EMPTY]".into()));
 
         Ok(())
     }

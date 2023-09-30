@@ -11,6 +11,7 @@ use chrono::Utc;
 use mailmule::{
     config::Config,
     email::{EmailAdderess, EmailClient},
+    helpers::SocketAddr,
     subscribe::{SubscriptionConfirmQuery, SubscriptionForm, SubscriptionStatus},
 };
 use rand::Rng;
@@ -29,31 +30,37 @@ const SUBSCRIPTION_TOKEN_LEN: usize = 26;
 async fn email_subscription_confirmation(
     email_client: Arc<EmailClient>,
     to: &EmailAdderess,
+    mut subscription_url: reqwest::Url,
     subscription_token: &str,
-) -> (StatusCode, String) {
-    match email_client
+) -> Result<()> {
+    subscription_url.set_query(Some(&format!("token={}", subscription_token)));
+    email_client
         .email(
             to,
             "Newsletter subscription confirmation",
-            &format!("subscribe/confirm?token={}", subscription_token),
-            &format!("subscribe/confirm?token={}", subscription_token),
+            &format!("Open the link to confirm your newsletter subscription. {subscription_url}",),
+            &format!(
+                "
+                <p>
+                    Open the link to confirm your newsletter subscription.<br />
+                    <a href='{0}'>{0}</a>
+                </p>",
+                subscription_url
+            ),
         )
         .await
-        .map_err(|e| {
-            format!(
-                "Subscriber added, but failed to send a confirmation email\nCause:\n\t{}",
-                e
-            )
-        }) {
-        Ok(_) => (StatusCode::OK, "A confirmation email has been sent.".into()),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e),
-    }
+        .map_err(|e| anyhow::anyhow!("Failed to send a confirmation email\nCause:\n\t{}", e))?;
+
+    info!(%subscription_url, "Sent a confirmation email");
+
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
 struct SubscribeState {
     pub pool: PgPool,
     pub email_client: Arc<EmailClient>,
+    pub subscribe_confirm_endpoint: reqwest::Url,
 }
 
 /// Content-Type: application/x-www-form-urlencoded
@@ -79,10 +86,16 @@ async fn subscribe(
     .await?
     .map(|obj| SubscriptionStatus::from_str(&obj.status).expect("Stored value must be valid"))
     {
-        Some(SubscriptionStatus::Confirmed) => Ok((
-            StatusCode::OK,
-            format!("{} is already subscribed", form.email.as_ref()),
-        )),
+        Some(SubscriptionStatus::Confirmed) => {
+            info!("Already subscribed and confirmed");
+            Ok((
+                StatusCode::OK,
+                format!(
+                    "{} is already subscribed and confirmed",
+                    form.email.as_ref()
+                ),
+            ))
+        }
         // Send a new confirmation email
         Some(SubscriptionStatus::Pending) => {
             let uuid = sqlx::query!(
@@ -110,12 +123,18 @@ async fn subscribe(
             .execute(&state.pool)
             .await?;
 
-            Ok(email_subscription_confirmation(
+            email_subscription_confirmation(
                 state.email_client,
                 &form.email,
+                state.subscribe_confirm_endpoint.clone(),
                 &subscription_token,
             )
-            .await)
+            .await?;
+
+            Ok((
+                StatusCode::OK,
+                "A confirmation email has been sent again.".into(),
+            ))
         }
         // Add subscriber
         None => {
@@ -155,12 +174,15 @@ async fn subscribe(
                 subscription_token, "Subscriber added to the database"
             );
 
-            Ok(email_subscription_confirmation(
+            email_subscription_confirmation(
                 state.email_client,
                 &form.email,
+                state.subscribe_confirm_endpoint.clone(),
                 &subscription_token,
             )
-            .await)
+            .await?;
+
+            Ok((StatusCode::OK, "A confirmation email has been sent.".into()))
         }
     }
 }
@@ -215,10 +237,10 @@ async fn main() -> Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let cfg = Config::load()?;
+    let mut cfg = Config::load()?;
     let email_client = Arc::new(EmailClient::try_from(cfg.email_client)?);
 
-    let pg_opts = cfg.db.get_connect_options(true);
+    let pg_opts = cfg.database.url.0;
     info!(pg_opts = ?pg_opts.clone().password("REDACTED"), "Connecting to the database");
     let pool = sqlx::PgPool::connect_with(pg_opts).await?;
     info!("Connected to the database");
@@ -231,6 +253,11 @@ async fn main() -> Result<()> {
             post(subscribe).with_state(SubscribeState {
                 pool: pool.clone(),
                 email_client: email_client.clone(),
+                subscribe_confirm_endpoint: cfg
+                    .app
+                    .base_url()?
+                    .join("subscribe/")?
+                    .join("confirm")?,
             }),
         )
         .route(
@@ -277,10 +304,14 @@ async fn main() -> Result<()> {
                 ),
         );
 
-    let listener = TcpListener::bind(format!("{}:{}", cfg.app.host, cfg.app.port)).await?;
-    let addr = listener.local_addr()?.to_string();
+    let listener = TcpListener::bind(cfg.app.socket_addr.0).await?;
+    // Updating socket after listening
+    cfg.app.socket_addr = SocketAddr(listener.local_addr()?);
 
-    info!(addr = format!("http://{}", addr), "Starting server on");
+    info!(
+        addr = format!("http://{}", cfg.app.socket_addr.0.to_string()),
+        "Starting server on"
+    );
     axum::Server::from_tcp(listener.into_std()?)?
         .serve(app.into_make_service())
         .with_graceful_shutdown(shutdown_signal())

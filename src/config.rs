@@ -1,38 +1,33 @@
-use crate::email::EmailAdderess;
+use crate::{email::EmailAdderess, helpers};
 use anyhow::Result;
-use sqlx::postgres::PgConnectOptions;
 use std::time::Duration;
 
 #[derive(Debug, serde::Deserialize)]
 #[allow(dead_code)]
 pub struct Config {
     pub app: AppConfig,
-    pub db: DatabaseConfig,
+    pub database: DatabaseConfig,
     pub email_client: EmailClientConfig,
 }
 
 #[derive(Debug, serde::Deserialize)]
 #[allow(dead_code)]
 pub struct AppConfig {
-    pub host: String,
-    pub port: u16,
+    pub socket_addr: helpers::SocketAddr,
+    pub public_url: Option<helpers::Url>,
 }
 
 #[derive(Debug, serde::Deserialize)]
 #[allow(dead_code)]
 pub struct DatabaseConfig {
-    pub username: String,
-    pub password: String,
-    pub host: String,
-    pub port: u16,
-    pub database: String,
+    pub url: helpers::PgConnectOptions,
 }
 
 #[serde_with::serde_as]
 #[derive(Debug, serde::Deserialize)]
 #[allow(dead_code)]
 pub struct EmailClientConfig {
-    pub api_url: String,
+    pub api_url: helpers::Url,
     pub api_token: String,
     pub sender_email: EmailAdderess,
     #[serde_as(as = "serde_with::DurationMilliSeconds<u64>")]
@@ -50,18 +45,14 @@ impl Config {
     }
 }
 
-impl DatabaseConfig {
-    pub fn get_connect_options(&self, with_db: bool) -> PgConnectOptions {
-        let options = PgConnectOptions::new()
-            .host(&self.host)
-            .port(self.port)
-            .username(&self.username)
-            .password(&self.password);
-
-        if with_db {
-            options.database(&self.database)
-        } else {
-            options
-        }
+impl AppConfig {
+    pub fn base_url(&self) -> Result<reqwest::Url> {
+        Ok(self
+            .public_url
+            .as_ref()
+            .map(|url| url.0.clone())
+            .unwrap_or({
+                reqwest::Url::parse(&format!("http://{}", self.socket_addr.0.to_string()))?
+            }))
     }
 }
