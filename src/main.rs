@@ -10,11 +10,12 @@ use axum::{
 use chrono::Utc;
 use mailmule::{
     config::Config,
+    email::{EmailAdderess, EmailClient},
     subscribe::{SubscriptionConfirmQuery, SubscriptionForm, SubscriptionStatus},
 };
 use rand::Rng;
 use sqlx::PgPool;
-use std::{str::FromStr, time::Duration};
+use std::{str::FromStr, sync::Arc, time::Duration};
 use tokio::net::TcpListener;
 use tower_http::{classify::ServerErrorsFailureClass, trace::TraceLayer};
 use tracing::{error, info, info_span, instrument, Span};
@@ -25,16 +26,46 @@ type ServerResult<T, E = ServerError> = core::result::Result<T, E>;
 
 const SUBSCRIPTION_TOKEN_LEN: usize = 26;
 
+async fn email_subscription_confirmation(
+    email_client: Arc<EmailClient>,
+    to: &EmailAdderess,
+    subscription_token: &str,
+) -> (StatusCode, String) {
+    match email_client
+        .email(
+            to,
+            "Newsletter subscription confirmation",
+            &format!("subscribe/confirm?token={}", subscription_token),
+            &format!("subscribe/confirm?token={}", subscription_token),
+        )
+        .await
+        .map_err(|e| {
+            format!(
+                "Subscriber added, but failed to send a confirmation email\nCause:\n\t{}",
+                e
+            )
+        }) {
+        Ok(_) => (StatusCode::OK, "A confirmation email has been sent.".into()),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e),
+    }
+}
+
+#[derive(Debug, Clone)]
+struct SubscribeState {
+    pub pool: PgPool,
+    pub email_client: Arc<EmailClient>,
+}
+
 /// Content-Type: application/x-www-form-urlencoded
 #[instrument(
-    skip(pool, form),
+    skip(state, form),
     fields(
         email = form.email.as_ref(),
         name = form.name.as_ref()
     )
 )]
 async fn subscribe(
-    State(pool): State<PgPool>,
+    State(state): State<SubscribeState>,
     Form(form): Form<SubscriptionForm>,
 ) -> ServerResult<impl IntoResponse> {
     match sqlx::query!(
@@ -44,20 +75,51 @@ async fn subscribe(
         "#,
         form.email.as_ref()
     )
-    .fetch_optional(&pool)
+    .fetch_optional(&state.pool)
     .await?
-    .map(|obj| SubscriptionStatus::from_str(&obj.status).expect("Value stored in db must be valid"))
+    .map(|obj| SubscriptionStatus::from_str(&obj.status).expect("Stored value must be valid"))
     {
         Some(SubscriptionStatus::Confirmed) => Ok((
             StatusCode::OK,
             format!("{} is already subscribed", form.email.as_ref()),
         )),
+        // Send a new confirmation email
         Some(SubscriptionStatus::Pending) => {
-            Ok((StatusCode::OK, "TODO: send confirmation email again".into()))
+            let uuid = sqlx::query!(
+                r#"
+                SELECT id FROM subscribers
+                WHERE email = $1
+                "#,
+                form.email.as_ref(),
+            )
+            .fetch_optional(&state.pool)
+            .await?
+            .map(|obj| obj.id)
+            .expect("Subscriber must exist if we're in the Status::Pending branch");
+
+            let subscription_token = subscription_token(SUBSCRIPTION_TOKEN_LEN);
+            sqlx::query!(
+                r#"
+                UPDATE subscription_tokens
+                SET subscription_token = $1
+                WHERE subscriber_id = $2
+                "#,
+                subscription_token,
+                uuid
+            )
+            .execute(&state.pool)
+            .await?;
+
+            Ok(email_subscription_confirmation(
+                state.email_client,
+                &form.email,
+                &subscription_token,
+            )
+            .await)
         }
+        // Add subscriber
         None => {
-            // Add subscriber
-            let mut transaction = pool.begin().await?;
+            let mut transaction = state.pool.begin().await?;
 
             let uuid = Uuid::new_v4();
             sqlx::query!(
@@ -93,9 +155,12 @@ async fn subscribe(
                 subscription_token, "Subscriber added to the database"
             );
 
-            // TODO: Send an email with the subscription confirm link.
-
-            Ok((StatusCode::OK, "A confirmation email has been sent.".into()))
+            Ok(email_subscription_confirmation(
+                state.email_client,
+                &form.email,
+                &subscription_token,
+            )
+            .await)
         }
     }
 }
@@ -151,6 +216,7 @@ async fn main() -> Result<()> {
         .init();
 
     let cfg = Config::load()?;
+    let email_client = Arc::new(EmailClient::try_from(cfg.email_client)?);
 
     let pg_opts = cfg.db.get_connect_options(true);
     info!(pg_opts = ?pg_opts.clone().password("REDACTED"), "Connecting to the database");
@@ -160,7 +226,13 @@ async fn main() -> Result<()> {
     let app = Router::new()
         .route("/", get(|| async { "Hello, World!" }))
         .route("/health", get(|| async { StatusCode::OK }))
-        .route("/subscribe", post(subscribe).with_state(pool.clone()))
+        .route(
+            "/subscribe",
+            post(subscribe).with_state(SubscribeState {
+                pool: pool.clone(),
+                email_client: email_client.clone(),
+            }),
+        )
         .route(
             "/subscribe/confirm",
             get(subscribe_confirm).with_state(pool.clone()),
