@@ -49,7 +49,7 @@ async fn email_subscription_confirmation(
             ),
         )
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to send a confirmation email\nCause:\n\t{}", e))?;
+        .context("Failed to send a confirmation email, please try again later.")?;
 
     info!(%subscription_url, "Sent a confirmation email");
 
