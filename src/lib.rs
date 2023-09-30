@@ -1,6 +1,7 @@
 pub mod config;
 pub mod email;
 pub mod helpers;
+pub mod publish;
 pub mod subscribe;
 
 type ServerResult<T, E = ServerError> = core::result::Result<T, E>;

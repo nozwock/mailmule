@@ -7,8 +7,11 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use mailmule::subscribe::{subscribe, subscribe_confirm, SubscribeState};
-use mailmule::{config::Config, email::EmailClient, helpers::SocketAddr};
+use mailmule::{config::Config, email::EmailClient, helpers::SocketAddr, publish::PublishState};
+use mailmule::{
+    publish::publish,
+    subscribe::{subscribe, subscribe_confirm, SubscribeState},
+};
 use std::{sync::Arc, time::Duration};
 use tokio::net::TcpListener;
 use tower_http::{classify::ServerErrorsFailureClass, trace::TraceLayer};
@@ -54,6 +57,13 @@ async fn main() -> Result<()> {
         .route(
             "/subscribe/confirm",
             get(subscribe_confirm).with_state(pool.clone()),
+        )
+        .route(
+            "/publish",
+            post(publish).with_state(PublishState {
+                pool: pool.clone(),
+                email_client: email_client.clone(),
+            }),
         )
         .layer(
             TraceLayer::new_for_http()
