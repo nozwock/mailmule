@@ -39,6 +39,9 @@ impl Config {
         config::Config::builder()
             .add_source(config::File::with_name("mailmule"))
             .add_source(config::Environment::with_prefix("MM"))
+            .set_default("email_client.api_url", "https://api.postmarkapp.com")?
+            .set_default("email_client.api_token", "POSTMARK_API_TEST")?
+            .set_default("email_client.timeout_ms", "10000")?
             .build()?
             .try_deserialize()
             .map_err(anyhow::Error::from)
