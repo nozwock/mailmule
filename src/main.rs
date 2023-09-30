@@ -27,35 +27,6 @@ type ServerResult<T, E = ServerError> = core::result::Result<T, E>;
 
 const SUBSCRIPTION_TOKEN_LEN: usize = 26;
 
-async fn email_subscription_confirmation(
-    email_client: Arc<EmailClient>,
-    to: &EmailAdderess,
-    mut subscription_url: reqwest::Url,
-    subscription_token: &str,
-) -> Result<()> {
-    subscription_url.set_query(Some(&format!("token={}", subscription_token)));
-    email_client
-        .email(
-            to,
-            "Newsletter subscription confirmation",
-            &format!("Open the link to confirm your newsletter subscription. {subscription_url}",),
-            &format!(
-                "
-                <p>
-                    Open the link to confirm your newsletter subscription.<br />
-                    <a href='{0}'>{0}</a>
-                </p>",
-                subscription_url
-            ),
-        )
-        .await
-        .context("Failed to send a confirmation email, please try again later.")?;
-
-    info!(%subscription_url, "Sent a confirmation email");
-
-    Ok(())
-}
-
 #[derive(Debug, Clone)]
 struct SubscribeState {
     pub pool: PgPool,
@@ -75,6 +46,37 @@ async fn subscribe(
     State(state): State<SubscribeState>,
     Form(form): Form<SubscriptionForm>,
 ) -> ServerResult<impl IntoResponse> {
+    async fn email_subscription_confirmation(
+        email_client: Arc<EmailClient>,
+        to: &EmailAdderess,
+        mut subscription_url: reqwest::Url,
+        subscription_token: &str,
+    ) -> Result<()> {
+        subscription_url.set_query(Some(&format!("token={}", subscription_token)));
+        email_client
+            .email(
+                to,
+                "Newsletter subscription confirmation",
+                &format!(
+                    "Open the link to confirm your newsletter subscription. {subscription_url}",
+                ),
+                &format!(
+                    "
+                <p>
+                    Open the link to confirm your newsletter subscription.<br />
+                    <a href='{0}'>{0}</a>
+                </p>",
+                    subscription_url
+                ),
+            )
+            .await
+            .context("Failed to send a confirmation email, please try again later.")?;
+
+        info!(%subscription_url, "Sent a confirmation email");
+
+        Ok(())
+    }
+
     match sqlx::query!(
         r#"
         SELECT status FROM subscribers
