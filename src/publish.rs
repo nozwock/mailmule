@@ -11,7 +11,7 @@ use axum::{
 };
 use sqlx::PgPool;
 use std::sync::Arc;
-use tracing::instrument;
+use tracing::{info, instrument, warn};
 
 #[derive(Debug, serde::Deserialize)]
 pub struct PublishBody {
@@ -31,13 +31,16 @@ pub struct PublishState {
     pub email_client: Arc<EmailClient>,
 }
 
-#[instrument(skip(state, body))]
+#[instrument(
+    skip(state, body),
+    fields(title = body.title)
+)]
 pub async fn publish(
     State(state): State<PublishState>,
     Json(body): Json<PublishBody>,
 ) -> ServerResult<Response> {
     let mut valids = 0usize;
-    let mut totals = 0usize;
+    let mut total = 0usize;
 
     let confirmed_emails: Vec<EmailAdderess> = sqlx::query!(
         r#"
@@ -54,16 +57,18 @@ pub async fn publish(
         if res.is_ok() {
             valids = valids + 1;
         }
-        totals = totals + 1;
+        total = total + 1;
     })
     .filter_map(|res| match res {
         Ok(email) => Some(email),
         Err(err) => {
-            tracing::warn!(err = ?err.context("Skipping subscriber due to invalid data"));
+            warn!(err = ?err.context("Skipping subscriber due to invalid data"));
             None
         }
     })
     .collect();
+
+    info!("Evaluated valid email addresses, now sending emails");
 
     for (i, res) in futures::future::join_all(confirmed_emails.iter().map(|email| {
         state
@@ -75,13 +80,15 @@ pub async fn publish(
     .enumerate()
     {
         if let Err(err) = res {
-            tracing::warn!(to = confirmed_emails[i].as_ref(), err = ?err.context("Failed to send email"));
+            warn!(to = confirmed_emails[i].as_ref(), err = ?err.context("Failed to send email"));
         }
     }
 
+    info!(valids, total, "Dispatched content to valid subscribers");
+
     Ok((
         StatusCode::OK,
-        format!("Dispatched content to {valids}/{totals} subscribers.",),
+        format!("Dispatched content to {valids}/{total} subscribers.",),
     )
         .into_response())
 }
