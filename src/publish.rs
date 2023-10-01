@@ -3,7 +3,6 @@ use crate::{
     subscribe::SubscriptionStatus,
     ServerResult,
 };
-use anyhow::Result;
 use axum::response::IntoResponse;
 use axum::{
     extract::{Json, State},
@@ -32,12 +31,15 @@ pub struct PublishState {
     pub email_client: Arc<EmailClient>,
 }
 
-#[instrument(skip(state))]
+#[instrument(skip(state, body))]
 pub async fn publish(
     State(state): State<PublishState>,
     Json(body): Json<PublishBody>,
 ) -> ServerResult<Response> {
-    let confirmed_emails: Vec<Result<EmailAdderess>> = sqlx::query!(
+    let mut valids = 0usize;
+    let mut totals = 0usize;
+
+    let confirmed_emails: Vec<EmailAdderess> = sqlx::query!(
         r#"
         SELECT email FROM subscribers
         WHERE status = $1
@@ -48,36 +50,38 @@ pub async fn publish(
     .await?
     .into_iter()
     .map(|obj| EmailAdderess::new(obj.email))
+    .inspect(|res| {
+        if res.is_ok() {
+            valids = valids + 1;
+        }
+        totals = totals + 1;
+    })
+    .filter_map(|res| match res {
+        Ok(email) => Some(email),
+        Err(err) => {
+            tracing::warn!(err = ?err.context("Skipping subscriber due to invalid data"));
+            None
+        }
+    })
     .collect();
 
-    let valids = confirmed_emails.iter().filter(|res| res.is_ok()).count();
-    let totals = confirmed_emails.len();
-
-    for email in confirmed_emails {
-        match email {
-            Ok(valid_email) => {
-                if let Err(err) = state
-                    .email_client
-                    .email(
-                        &valid_email,
-                        &body.title,
-                        &body.content.text,
-                        &body.content.html,
-                    )
-                    .await
-                {
-                    tracing::warn!(to = valid_email.as_ref(), err = ?err.context("Failed to send email"));
-                }
-            }
-            Err(err) => {
-                tracing::warn!(err = ?err.context("Skipping subscriber due to invalid data"));
-            }
+    for (i, res) in futures::future::join_all(confirmed_emails.iter().map(|email| {
+        state
+            .email_client
+            .email(&email, &body.title, &body.content.text, &body.content.html)
+    }))
+    .await
+    .into_iter()
+    .enumerate()
+    {
+        if let Err(err) = res {
+            tracing::warn!(to = confirmed_emails[i].as_ref(), err = ?err.context("Failed to send email"));
         }
     }
 
     Ok((
         StatusCode::OK,
-        format!("{valids}/{totals} Dispatched news to subscribers.",),
+        format!("Dispatched news to {valids}/{totals} subscribers.",),
     )
         .into_response())
 }
