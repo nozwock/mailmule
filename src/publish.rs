@@ -41,6 +41,7 @@ pub async fn publish(
 ) -> ServerResult<Response> {
     let mut valids = 0usize;
     let mut total = 0usize;
+    let mut fails = 0usize;
 
     let confirmed_emails: Vec<EmailAdderess> = sqlx::query!(
         r#"
@@ -81,14 +82,18 @@ pub async fn publish(
     {
         if let Err(err) = res {
             warn!(to = confirmed_emails[i].as_ref(), err = ?err.context("Failed to send email"));
+            fails = fails + 1;
         }
     }
 
-    info!(valids, total, "Dispatched content to valid subscribers");
+    info!(valids, fails, total, "Dispatched content to subscribers");
 
     Ok((
         StatusCode::OK,
-        format!("Dispatched content to {valids}/{total} subscribers.",),
+        format!(
+            "Dispatched content to {}/{total} subscribers.",
+            valids - fails
+        ),
     )
         .into_response())
 }
