@@ -2,5 +2,5 @@
 CREATE TABLE users (
     id uuid PRIMARY KEY,
     username TEXT NOT NULL UNIQUE,
-    password_phc_hash TEXT NOT NULL
+    password_hash TEXT NOT NULL
 )
