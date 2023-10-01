@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 const SUBSCRIPTION_TOKEN_LEN: usize = 26;
 
-fn subscription_token(len: usize) -> String {
+fn gen_subscription_token(len: usize) -> String {
     let mut rng = rand::thread_rng();
     std::iter::repeat_with(|| rng.sample(rand::distributions::Alphanumeric))
         .map(char::from)
@@ -151,7 +151,7 @@ pub async fn subscribe(
                 ),
             ))
         }
-        // Send a new confirmation email
+        // Send the confirmation email again
         Some(SubscriptionStatus::Pending) => {
             let uuid = sqlx::query!(
                 r#"
@@ -165,18 +165,17 @@ pub async fn subscribe(
             .map(|obj| obj.id)
             .expect("Subscriber must exist if we're in the Status::Pending branch");
 
-            let subscription_token = subscription_token(SUBSCRIPTION_TOKEN_LEN);
-            sqlx::query!(
+            let subscription_token = sqlx::query!(
                 r#"
-                UPDATE subscription_tokens
-                SET subscription_token = $1
-                WHERE subscriber_id = $2
+                SELECT subscription_token FROM subscription_tokens
+                WHERE subscriber_id = $1
                 "#,
-                subscription_token,
-                uuid
+                uuid,
             )
-            .execute(&state.pool)
-            .await?;
+            .fetch_optional(&state.pool)
+            .await?
+            .map(|obj| obj.subscription_token)
+            .expect("Subscription token must exist if we're in the Status::Pending branch");
 
             email_subscription_confirmation(
                 state.email_client,
@@ -210,7 +209,7 @@ pub async fn subscribe(
             .execute(&mut *transaction)
             .await?;
 
-            let subscription_token = subscription_token(SUBSCRIPTION_TOKEN_LEN);
+            let subscription_token = gen_subscription_token(SUBSCRIPTION_TOKEN_LEN);
             sqlx::query!(
                 r#"
                 INSERT INTO subscription_tokens (subscription_token, subscriber_id)
