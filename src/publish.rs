@@ -81,7 +81,7 @@ pub async fn publish(
 
     Ok((
         StatusCode::OK,
-        format!("Dispatched news to {valids}/{totals} subscribers.",),
+        format!("Dispatched content to {valids}/{totals} subscribers.",),
     )
         .into_response())
 }
