@@ -1,5 +1,5 @@
 use crate::email::{EmailAdderess, EmailClient};
-use crate::ServerResult;
+use crate::{ServerError, ServerResult};
 use anyhow::{bail, Context, Result};
 use axum::extract::Query;
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Form};
@@ -107,7 +107,7 @@ pub async fn subscribe(
     ) -> Result<()> {
         subscription_url.set_query(Some(&format!("token={}", subscription_token)));
         email_client
-            .email(
+            .send_email(
                 to,
                 "Newsletter subscription confirmation",
                 &format!(
@@ -138,7 +138,8 @@ pub async fn subscribe(
         form.email.as_ref()
     )
     .fetch_optional(&state.pool)
-    .await?
+    .await
+    .map_err(ServerError::unexpected)?
     .map(|obj| SubscriptionStatus::from_str(&obj.status).expect("Stored value must be valid"))
     {
         Some(SubscriptionStatus::Confirmed) => {
@@ -161,7 +162,8 @@ pub async fn subscribe(
                 form.email.as_ref(),
             )
             .fetch_optional(&state.pool)
-            .await?
+            .await
+            .map_err(ServerError::unexpected)?
             .map(|obj| obj.id)
             .expect("Subscriber must exist if we're in the Status::Pending branch");
 
@@ -173,7 +175,8 @@ pub async fn subscribe(
                 uuid,
             )
             .fetch_optional(&state.pool)
-            .await?
+            .await
+            .map_err(ServerError::unexpected)?
             .map(|obj| obj.subscription_token)
             .expect("Subscription token must exist if we're in the Status::Pending branch");
 
@@ -192,7 +195,7 @@ pub async fn subscribe(
         }
         // Add subscriber
         None => {
-            let mut transaction = state.pool.begin().await?;
+            let mut transaction = state.pool.begin().await.map_err(ServerError::unexpected)?;
 
             let uuid = Uuid::new_v4();
             sqlx::query!(
@@ -207,7 +210,8 @@ pub async fn subscribe(
                 Utc::now()
             )
             .execute(&mut *transaction)
-            .await?;
+            .await
+            .map_err(ServerError::unexpected)?;
 
             let subscription_token = gen_subscription_token(SUBSCRIPTION_TOKEN_LEN);
             sqlx::query!(
@@ -219,9 +223,13 @@ pub async fn subscribe(
                 uuid
             )
             .execute(&mut *transaction)
-            .await?;
+            .await
+            .map_err(ServerError::unexpected)?;
 
-            transaction.commit().await?;
+            transaction
+                .commit()
+                .await
+                .map_err(ServerError::unexpected)?;
 
             info!(
                 ?uuid,
@@ -257,7 +265,8 @@ pub async fn subscribe_confirm(
         query.token
     )
     .fetch_optional(&pool)
-    .await?
+    .await
+    .map_err(ServerError::unexpected)?
     .map(|obj| obj.subscriber_id)
     .context("No such subscription token found.")?;
 
@@ -271,7 +280,8 @@ pub async fn subscribe_confirm(
         uuid
     )
     .execute(&pool)
-    .await?;
+    .await
+    .map_err(ServerError::unexpected)?;
 
     info!(?uuid, "Subscription confirmed");
 

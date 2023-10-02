@@ -1,7 +1,7 @@
 use crate::{
     email::{EmailAdderess, EmailClient},
     subscribe::SubscriptionStatus,
-    ServerResult,
+    ServerError, ServerResult,
 };
 use axum::response::IntoResponse;
 use axum::{
@@ -9,6 +9,7 @@ use axum::{
     http::StatusCode,
     response::Response,
 };
+use futures::future;
 use sqlx::PgPool;
 use std::sync::Arc;
 use tracing::{info, instrument, warn};
@@ -51,7 +52,8 @@ pub async fn publish(
         SubscriptionStatus::Confirmed.to_string()
     )
     .fetch_all(&state.pool)
-    .await?
+    .await
+    .map_err(ServerError::unexpected)?
     .into_iter()
     .map(|obj| EmailAdderess::new(obj.email))
     .inspect(|res| {
@@ -71,10 +73,10 @@ pub async fn publish(
 
     info!("Evaluated valid email addresses, now sending emails");
 
-    for (i, res) in futures::future::join_all(confirmed_emails.iter().map(|email| {
+    for (i, res) in future::join_all(confirmed_emails.iter().map(|email| {
         state
             .email_client
-            .email(&email, &body.title, &body.content.text, &body.content.html)
+            .send_email(&email, &body.title, &body.content.text, &body.content.html)
     }))
     .await
     .into_iter()

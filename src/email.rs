@@ -81,7 +81,7 @@ pub struct EmailRequestBody<'a> {
 
 impl EmailClient {
     /// https://postmarkapp.com/developer/user-guide/send-email-with-api/send-a-single-email
-    pub async fn email(
+    pub async fn send_email(
         &self,
         to: &EmailAdderess,
         subject: &str,

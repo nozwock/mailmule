@@ -7,7 +7,9 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use mailmule::{config::Config, email::EmailClient, helpers::SocketAddr, publish::PublishState};
+use mailmule::{
+    auth::login, config::Config, email::EmailClient, helpers::SocketAddr, publish::PublishState,
+};
 use mailmule::{
     publish::publish,
     subscribe::{subscribe, subscribe_confirm, SubscribeState},
@@ -64,6 +66,11 @@ async fn main() -> Result<()> {
                 pool: pool.clone(),
                 email_client: email_client.clone(),
             }),
+        )
+        .route("/login", get(login).with_state(pool.clone()))
+        .route(
+            "/signup",
+            post(mailmule::auth::singup).with_state(pool.clone()),
         )
         .layer(
             TraceLayer::new_for_http()
